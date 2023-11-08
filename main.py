@@ -9,7 +9,7 @@ from decouple import config
 
 # Use 'config' to read values from the .env file
 HOST = config('HOST', default='127.0.0.1')
-PORT = config('PORT', default=8081, cast=int)
+PORT = config('PORT', default=8232, cast=int)
 TARGET_HOST = config('TARGET_HOST')
 
 
