@@ -1,75 +1,57 @@
-import http.server
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from bs4 import BeautifulSoup
 import http.client
-import socketserver
-import bs4
 import re
 
 from decouple import config
 
-
-# Use 'config' to read values from the .env file
 HOST = config('HOST', default='127.0.0.1')
 PORT = config('PORT', default=8232, cast=int)
-TARGET_HOST = config('TARGET_HOST')
 
 
-class ProxyHandler(http.server.SimpleHTTPRequestHandler):
-
+class ProxyHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        # Определить целевой хост и порт
+        target_host = "news.ycombinator.com"
+        target_port = 443
 
-        client = http.client.HTTPSConnection(TARGET_HOST)
-        client.request('GET', self.path)
-        response = client.getresponse()
+        # Подключиться к целевому серверу
+        conn = http.client.HTTPSConnection(target_host, target_port)
+        conn.request("GET", self.path)
 
-        # Get the page content as a string
-        html = response.read().decode('utf-8')
-        # Modify the HTML content
-        modified_html = self.modify_html(html)
+        # Получить ответ от целевого сервера
+        response = conn.getresponse()
+        response_data = response.read()
 
+        # Анализировать HTML-код с помощью BeautifulSoup
+        soup = BeautifulSoup(response_data, 'html.parser')
 
-        # Send the status code
+        # Заменить каждое слово из шести букв значком "™" в текстовом содержимом
+        for tag in soup.find_all(text=True):
+            if tag.parent.name not in ['style', 'script']:
+                tag.replace_with(self.modify_html(tag))
+
+        modified_response = str(soup)
+
+        # Отправить модифицированный ответ клиенту
         self.send_response(response.status)
-        # Add headers to the response
-        for header in response.getheaders():
-            self.send_header(*header)
-
+        self.send_header("Content-type", "text/html; charset=utf-8")
         self.end_headers()
-        self.wfile.write(modified_html.encode('utf-8'))
-
-        client.close()
+        self.wfile.write(modified_response.encode("utf-8"))
 
     @staticmethod
-    def modify_html(html):
-        """
-        Modify the HTML content of the page.
-        """
-        soup = bs4.BeautifulSoup(html, 'lxml')
+    def modify_html(content):
+        # Шаблон для слов из шести букв
+        pattern = r'\b\w{6}\b'
 
-        try:
-            # Find all <div> tags with class 'comment'
-            comments = soup.find_all('div', {'class': 'comment'})
+        # Заменить каждое слово из шести букв значком "™"
+        modified_content = re.sub(pattern, lambda match: match.group() + '™', content)
 
-            pattern = r"(?:(?<=\s)|(?<=^))[a-zA-ZА-Яа-я-]{6}(?=\s|\,|\.|\:)"
-
-            for comment in comments:
-                print(comment.get_text())
-
-                text = str(comment.get_text())
-                modified_text = re.sub(pattern, r'\g<0>™', text)
-                comment.string = modified_text
-
-        except Exception as ex:
-            print('No posts found on the page')
-            print('Exception:', ex)
-
-        return soup.prettify()
+        return modified_content
 
 
-def run_proxy_server():
-    with socketserver.TCPServer((HOST, PORT), ProxyHandler) as httpd:
-        print('Server is running at', f'{HOST}:{PORT}')
-        httpd.serve_forever()
-
-
-if __name__ == '__main__':
-    run_proxy_server()
+if __name__ == "__main__":
+    server_address = (HOST, PORT)
+    httpd = HTTPServer(server_address, ProxyHandler)
+    print('Server is running at', f'{HOST}:{PORT}')
+    httpd.serve_forever()
